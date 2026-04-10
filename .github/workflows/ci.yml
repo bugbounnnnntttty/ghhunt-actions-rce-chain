@@ -1,0 +1,31 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Simulate a real CI build
+        run: |
+          echo "Building the project..."
+          mkdir -p dist
+          cat > dist/app.js <<'EOF'
+          console.log("Hello from legit build");
+          EOF
+          echo "LEGIT-BUILD-MARKER-${GITHUB_RUN_ID}" > dist/version.txt
+          ls -la dist/
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: dist/
