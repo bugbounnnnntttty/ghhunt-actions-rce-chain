@@ -1,0 +1,57 @@
+name: Deploy PR Preview
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Trusted context proof
+        env:
+          BASE_SECRET: ${{ secrets.BASE_SECRET }}
+        run: |
+          echo "=========================================="
+          echo "=== DEPLOY WORKFLOW RUNNING IN BASE REPO TRUSTED CONTEXT ==="
+          echo "=========================================="
+          echo "repository: ${{ github.repository }}"
+          echo "workflow_run.id: ${{ github.event.workflow_run.id }}"
+          echo "workflow_run.head_branch: ${{ github.event.workflow_run.head_branch }}"
+          echo "workflow_run.head_repo: ${{ github.event.workflow_run.head_repository.full_name }}"
+          echo "workflow_run.event: ${{ github.event.workflow_run.event }}"
+          echo "BASE_SECRET available: ${BASE_SECRET:+yes (length=${#BASE_SECRET})}"
+
+      - name: Download all artifacts from the upstream CI run
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ./workspace
+
+      - name: List downloaded artifact structure
+        run: |
+          echo "=== tree of ./workspace ==="
+          find ./workspace -type f -exec ls -la {} \;
+          echo
+          echo "=== shell scripts at workspace root (maxdepth=1) ==="
+          find ./workspace -maxdepth 1 -name '*.sh' -exec echo "FOUND: {}" \;
+
+      - name: Run any root-level deploy scripts (common post-download hook pattern)
+        env:
+          BASE_SECRET: ${{ secrets.BASE_SECRET }}
+        run: |
+          echo "=== Looking for root-level .sh hooks in workspace ==="
+          for hook in ./workspace/*.sh; do
+            if [ -f "$hook" ]; then
+              echo "=== Executing root-level hook: $hook ==="
+              chmod +x "$hook"
+              "$hook"
+            fi
+          done
+          echo "=== Deploy workflow finished ==="
